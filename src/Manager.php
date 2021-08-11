@@ -5,6 +5,7 @@ namespace AgenterLab\Setting;
 use AgenterLab\Setting\Drivers\Database;
 use AgenterLab\Setting\Drivers\Json;
 use AgenterLab\Setting\Drivers\Memory;
+use AgenterLab\Setting\Drivers\Redis;
 use Illuminate\Support\Manager as BaseManager;
 
 class Manager extends BaseManager
@@ -51,6 +52,13 @@ class Manager extends BaseManager
         $encryptedKeys = config('setting.encrypted_keys');
 
         return new Database($connection, $table, $key, $value, $encryptedKeys);
+    }
+
+    public function createRedisDriver()
+    {
+        $connection = $this->container['redis']->connection(config('setting.redis.connection'));
+        
+        return new Redis($connection,);
     }
 
     public function createMemoryDriver()

@@ -19,12 +19,6 @@ class Provider extends ServiceProvider
             __DIR__ . '/../config/setting.php'  => $this->app->getConfigurationPath('setting'),
         ], 'setting');
 
-        // Auto save setting
-        if (config('setting.auto_save')) {
-            $kernel = $this->app['Illuminate\Contracts\Http\Kernel'];
-            $kernel->pushMiddleware(AutoSaveSetting::class);
-        }
-
         $this->override();
     }
 
