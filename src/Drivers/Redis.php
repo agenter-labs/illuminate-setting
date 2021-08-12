@@ -5,7 +5,7 @@ namespace AgenterLab\Setting\Drivers;
 use AgenterLab\Setting\Contracts\Driver;
 use AgenterLab\Setting\Support\Arr;
 use Closure;
-use Illuminate\Database\Connection;
+use Illuminate\Contracts\Redis\Connection;
 use Illuminate\Support\Arr as LaravelArr;
 use Illuminate\Support\Facades\Crypt;
 
@@ -14,7 +14,7 @@ class Redis extends Driver
     /**
      * The database connection instance.
      *
-     * @var \Illuminate\Database\Connection
+     * @var \Illuminate\Contracts\Redis\Connection
      */
     protected $connection;
 
@@ -27,7 +27,7 @@ class Redis extends Driver
     protected $extra_columns = [];
 
     /**
-     * @param \Illuminate\Database\Connection $connection
+     * @param \Illuminate\Contracts\Redis\Connection $connection
      * @param string $table
      */
     public function __construct(Connection $connection)
@@ -86,16 +86,13 @@ class Redis extends Driver
      */
     protected function write(array $data)
     {
-        // Get current data
-        $db_data = $this->newQuery()->get([$this->key, $this->value])->toArray();
+        $db_data = $this->read();
 
         $insert_data = LaravelArr::dot($data);
-        $update_data = [];
         $delete_keys = [];
+        $cache_key = $this->getCacheKey();
 
-        foreach ($db_data as $db_row) {
-            $key = $db_row->{$this->key};
-            $value = $db_row->{$this->value};
+        foreach ($db_data as $key => $value) {
 
             $is_in_insert = $is_different_in_db = $is_same_as_fallback = false;
 
@@ -109,131 +106,33 @@ class Redis extends Driver
                 if ($is_same_as_fallback) {
                     // Delete if new data is same as fallback
                     $delete_keys[] = $key;
-                } elseif ($is_different_in_db) {
-                    // Update if new data is different from db
-                    $update_data[$key] = $insert_data[$key];
+                    unset($insert_data[$key]);
                 }
             } else {
                 // Delete if current db not available in new data
                 $delete_keys[] = $key;
             }
-
-            unset($insert_data[$key]);
-        }
-
-        foreach ($update_data as $key => $value) {
-            $value = $this->prepareValue($key, $value);
-
-            $this->newQuery()
-                ->where($this->key, '=', $key)
-                ->update([$this->value => $value]);
-        }
-
-        if ($insert_data) {
-            $this->newQuery(true)
-                ->insert($this->prepareInsertData($insert_data));
         }
 
         if ($delete_keys) {
-            $this->newQuery()
-                ->whereIn($this->key, $delete_keys)
-                ->delete();
-        }
-    }
-
-    /**
-     * Transforms settings data into an array ready to be insterted into the
-     * database. Call array_dot on a multidimensional array before passing it
-     * into this method!
-     *
-     * @param array $data Call array_dot on a multidimensional array before passing it into this method!
-     *
-     * @return array
-     */
-    protected function prepareInsertData(array $data)
-    {
-        $db_data = [];
-
-        if ($this->getExtraColumns()) {
-            foreach ($data as $key => $value) {
-                $value = $this->prepareValue($key, $value);
-
-                // Don't insert if same as fallback
-                if ($this->isEqualToFallback($key, $value)) {
-                    continue;
-                }
-
-                $db_data[] = array_merge(
-                    $this->getExtraColumns(),
-                    [$this->key => $key, $this->value => $value]
-                );
-            }
-        } else {
-            foreach ($data as $key => $value) {
-                $value = $this->prepareValue($key, $value);
-
-                // Don't insert if same as fallback
-                if ($this->isEqualToFallback($key, $value)) {
-                    continue;
-                }
-
-                $db_data[] = [$this->key => $key, $this->value => $value];
-            }
+            array_unshift($delete_keys, $cache_key);
+            $this->connection->command('hdel', $delete_keys);
         }
 
-        return $db_data;
-    }
-
-    /**
-     * Checks if the provided key should be encrypted or not.
-     * Also type casts the given value to a string so errors with booleans or integers are handeled.
-     * Otherwise it returns the original value.
-     *
-     * @param  string $key   Key to check if it's inside the encryptedValues variable.
-     * @param  mixed $value  Info: Encryption only supports strings.
-     *
-     * @return string
-     */
-    protected function prepareValue(string $key, $value)
-    {
-        // Check if key should be encrypted
-        if (in_array($key, $this->encrypted_keys)) {
-            // Cast to string to avoid error when a user passes a boolean value
-            return Crypt::encryptString((string) $value);
+        if ($insert_data) {
+            $this->connection->hmset($cache_key, $insert_data);
         }
-
-        return $value;
     }
-
-    /**
-     * Checks if the provided key should be decrypted or not.
-     * Otherwise it returns the original value.
-     *
-     * @param  string $key   Key to check if it's inside the encryptedValues variable.
-     * @param  mixed $value  Info: Encryption only supports strings.
-     *
-     * @return string
-     */
-    protected function unpackValue(string $key, $value)
-    {
-        // Check if key should be encrypted
-        if (in_array($key, $this->encrypted_keys)) {
-            // Cast to string to avoid error when a user passes a boolean value
-            return Crypt::decryptString((string) $value);
-        }
-
-        return $value;
-    }
-
+    
     /**
      * {@inheritdoc}
      */
     protected function read()
     {
-        return $this->parseReadData($this->newQuery()->get());
+        return $this->parseReadData($this->connection->command('hgetall', [$this->getCacheKey()]));
     }
 
-    /**
+     /**
      * Parse data coming from the database.
      *
      * @param array $data
@@ -244,49 +143,10 @@ class Redis extends Driver
     {
         $results = [];
 
-        foreach ($data as $row) {
-            if (is_array($row)) {
-                $key = $row[$this->key];
-                $value = $row[$this->value];
-            } elseif (is_object($row)) {
-                $key = $row->{$this->key};
-                $value = $row->{$this->value};
-            } else {
-                $msg = 'Expected array or object, got ' . gettype($row);
-                throw new \UnexpectedValueException($msg);
-            }
-
-            // Encryption
-            $value = $this->unpackValue($key, $value);
-
+        foreach ($data as $key => $value) {
             Arr::set($results, $key, $value);
         }
 
         return $results;
-    }
-
-    /**
-     * Create a new query builder instance.
-     *
-     * @param bool $insert
-     *
-     * @return \Illuminate\Database\Query\Builder
-     */
-    protected function newQuery($insert = false)
-    {
-        $query = $this->connection->table($this->table);
-
-        if (!$insert) {
-            foreach ($this->getExtraColumns() as $key => $value) {
-                $query->where($key, '=', $value);
-            }
-        }
-
-        if ($this->query_constraint !== null) {
-            $callback = $this->query_constraint;
-            $callback($query, $insert);
-        }
-
-        return $query;
     }
 }
