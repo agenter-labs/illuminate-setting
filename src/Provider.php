@@ -2,7 +2,6 @@
 
 namespace AgenterLab\Setting;
 
-use AgenterLab\Setting\Middleware\AutoSaveSetting;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Arr;
 
