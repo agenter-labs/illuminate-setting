@@ -25,6 +25,16 @@ class Memory extends Driver
     }
 
     /**
+     * Set extra columns to be added to the rows.
+     *
+     * @param array $columns
+     */
+    public function setExtraColumns(array $columns)
+    {
+    
+    }
+
+    /**
      * {@inheritdoc}
      */
     protected function read()
