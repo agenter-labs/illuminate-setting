@@ -15,7 +15,7 @@ class Provider extends ServiceProvider
     public function boot()
     {
         $this->publishes([
-            __DIR__ . '/../config/setting.php'  => $this->app->getConfigurationPath('setting'),
+            __DIR__ . '/../config/setting.php'  => config_path('setting.php'),
         ], 'setting');
 
         $this->override();
