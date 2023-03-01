@@ -143,9 +143,12 @@ class Redis extends Driver
     {
         $results = [];
 
-        foreach ($data as $key => $value) {
-            Arr::set($results, $key, $value);
+        if (is_iterable($data)) {
+            foreach ($data as $key => $value) {
+                Arr::set($results, $key, $value);
+            }
         }
+        
 
         return $results;
     }
