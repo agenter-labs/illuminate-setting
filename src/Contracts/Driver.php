@@ -166,7 +166,7 @@ abstract class Driver
         }
 
         if (config('setting.cache.enabled')) {
-            Cache::forget($this->getCacheKey());
+            $this->getCacheStore()->forget($this->getCacheKey());
         }
 
         $this->unsaved = true;
@@ -207,7 +207,7 @@ abstract class Driver
         }
 
         if (config('setting.cache.enabled') && config('setting.cache.auto_clear')) {
-            Cache::forget($this->getCacheKey());
+            $this->getCacheStore()->forget($this->getCacheKey());
         }
 
         $this->write($this->data);
@@ -257,7 +257,7 @@ abstract class Driver
      */
     public function readDataFromCache()
     {
-        return Cache::remember($this->getCacheKey(), config('setting.cache.ttl'), function () {
+        return $this->getCacheStore()->remember($this->getCacheKey(), config('setting.cache.ttl'), function () {
             return $this->read();
         });
     }
@@ -294,6 +294,16 @@ abstract class Driver
         }
 
         return $key;
+    }
+
+    /**
+     * Get Cache store
+     *
+     * @return \Illuminate\Cache\Repository
+     */
+    public function getCacheStore()
+    {
+        return Cache::store(config('setting.cache.store'));
     }
 
     /**
